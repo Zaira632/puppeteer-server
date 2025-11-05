@@ -3,7 +3,6 @@ const axios = require('axios');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
 const Jimp = require('jimp');
-const path = require('path');
 const cloudinary = require('cloudinary').v2;
 
 dotenv.config();
@@ -33,17 +32,14 @@ class ImageGenerator {
     try {
       console.log('📝 Generating image...');
       
-      // Image create karo (1080x1350 - Instagram size)
       const image = new Jimp({
         width: 1080,
         height: 1350,
         color: this.hexToInt(bgColor)
       });
 
-      // Font load karo
       const font = await Jimp.loadFont(Jimp.FONT_SIZE_64);
 
-      // Text ko center mein print karo
       const lines = text.split('\n');
       const lineHeight = 100;
       const totalHeight = lines.length * lineHeight;
@@ -64,12 +60,6 @@ class ImageGenerator {
         startY += lineHeight;
       }
 
-      // Style add karo
-      if (style === 'border') {
-        this.addBorder(image, textColor);
-      }
-
-      // Image ko buffer mein convert karo
       const buffer = await image.toBuffer('image/png');
       console.log('✅ Image generated successfully');
       return buffer;
@@ -81,7 +71,6 @@ class ImageGenerator {
   }
 
   hexToInt(hex) {
-    // #RRGGBB ko integer mein convert karo
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     if (result) {
       const r = parseInt(result[1], 16);
@@ -89,13 +78,7 @@ class ImageGenerator {
       const b = parseInt(result[3], 16);
       return (r << 24) | (g << 16) | (b << 8) | 0xFF;
     }
-    return 0xFF6B6BFF; // Default color
-  }
-
-  addBorder(image, color) {
-    // Border drawing - simple approach
-    const borderWidth = 20;
-    // Advanced border logic can be added here
+    return 0xFF6B6BFF;
   }
 }
 
@@ -132,7 +115,6 @@ class SocialMediaPoster {
     try {
       console.log('📱 Posting to Instagram...');
 
-      // Step 1: Create container
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
         {
@@ -150,7 +132,6 @@ class SocialMediaPoster {
       const containerId = containerResponse.data.id;
       console.log('✅ Container created:', containerId);
 
-      // Step 2: Publish
       const publishResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media_publish`,
         {
@@ -230,11 +211,9 @@ async function automatePosting() {
     const imgGen = new ImageGenerator();
     const poster = new SocialMediaPoster();
 
-    // Random content select karo
     const content = CONTENT_TEMPLATES[Math.floor(Math.random() * CONTENT_TEMPLATES.length)];
     console.log('📋 Selected content:', content.text);
 
-    // Image generate karo
     const imageBuffer = await imgGen.generateImage(
       content.text,
       content.bgColor,
@@ -247,17 +226,13 @@ async function automatePosting() {
       return;
     }
 
-    // Imgur par upload karo
-    const imageUrl = await poster.uploadToImgur(imageBuffer);
+    const imageUrl = await poster.uploadToCloudinary(imageBuffer);
     if (!imageUrl) {
       console.error('❌ Upload failed');
       return;
     }
 
-    // Instagram par post karo
     const instaPostId = await poster.postToInstagram(imageUrl, content.caption);
-
-    // Facebook par post karo
     const fbPostId = await poster.postToFacebook(imageUrl, content.caption);
 
     const result = {
@@ -279,7 +254,6 @@ async function automatePosting() {
 
 // ===================== ROUTES =====================
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: '✅ Server is alive!',
@@ -288,7 +262,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Test route
 app.get('/screenshot', (req, res) => {
   res.json({
     status: '✅ Screenshot endpoint working!',
@@ -296,18 +269,17 @@ app.get('/screenshot', (req, res) => {
   });
 });
 
-// Status check
 app.get('/api/status', (req, res) => {
   res.json({
     server: 'running',
     instagram_configured: !!INSTAGRAM_TOKEN,
     facebook_configured: !!FACEBOOK_TOKEN,
+    cloudinary_configured: !!process.env.CLOUDINARY_CLOUD_NAME,
     scheduler: 'active',
     timestamp: new Date().toISOString()
   });
 });
 
-// Manual post trigger
 app.post('/api/post-now', async (req, res) => {
   try {
     const result = await automatePosting();
@@ -317,7 +289,6 @@ app.post('/api/post-now', async (req, res) => {
   }
 });
 
-// Generate custom image
 app.post('/api/generate-image', async (req, res) => {
   try {
     const { text, bgColor, textColor, style } = req.body;
@@ -342,17 +313,10 @@ app.post('/api/generate-image', async (req, res) => {
 });
 
 // ===================== SCHEDULER =====================
-// Daily 9 AM par post hoga
 cron.schedule('0 9 * * *', () => {
   console.log('\n⏰ Scheduled automation triggered');
   automatePosting();
 });
-
-// Har 6 hours par (optional)
-// cron.schedule('0 */6 * * *', () => {
-//   console.log('\n⏰ Scheduled automation triggered');
-//   automatePosting();
-// });
 
 console.log('✅ Scheduler started');
 
