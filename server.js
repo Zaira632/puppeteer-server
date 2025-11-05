@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
-const Jimp = require('jimp');
+const sharp = require('sharp');
 const cloudinary = require('cloudinary').v2;
 
 dotenv.config();
@@ -32,35 +32,41 @@ class ImageGenerator {
     try {
       console.log('📝 Generating image...');
       
-      const image = new Jimp({
-        width: 1080,
-        height: 1350,
-        color: this.hexToInt(bgColor)
-      });
-
-      const font = await Jimp.loadFont(Jimp.FONT_SIZE_64);
-
+      const width = 1080;
+      const height = 1350;
+      
+      // Convert hex to RGB
+      const bgRgb = this.hexToRgb(bgColor);
+      const textRgb = this.hexToRgb(textColor);
+      
+      // Create SVG with text
       const lines = text.split('\n');
-      const lineHeight = 100;
-      const totalHeight = lines.length * lineHeight;
-      let startY = (1350 - totalHeight) / 2;
-
-      for (let line of lines) {
-        const textWidth = Jimp.measureText(font, line);
-        const x = (1080 - textWidth) / 2;
-        image.print({
-          font: font,
-          x: x,
-          y: startY,
-          text: line,
-          maxWidth: 1000,
-          alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-          alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
-        });
-        startY += lineHeight;
+      let yPosition = 400;
+      let svgText = '';
+      
+      for (let i = 0; i < lines.length; i++) {
+        svgText += `<text x="540" y="${yPosition + (i * 150)}" 
+                    font-size="80" 
+                    font-weight="bold" 
+                    text-anchor="middle" 
+                    fill="rgb(${textRgb.r},${textRgb.g},${textRgb.b})"
+                    font-family="Arial, sans-serif">
+                    ${lines[i]}
+                  </text>`;
       }
-
-      const buffer = await image.toBuffer('image/png');
+      
+      const svg = `
+        <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+          <rect width="${width}" height="${height}" fill="rgb(${bgRgb.r},${bgRgb.g},${bgRgb.b})"/>
+          ${svgText}
+        </svg>
+      `;
+      
+      // Convert SVG to PNG
+      const buffer = await sharp(Buffer.from(svg))
+        .png()
+        .toBuffer();
+      
       console.log('✅ Image generated successfully');
       return buffer;
 
@@ -70,15 +76,16 @@ class ImageGenerator {
     }
   }
 
-  hexToInt(hex) {
+  hexToRgb(hex) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     if (result) {
-      const r = parseInt(result[1], 16);
-      const g = parseInt(result[2], 16);
-      const b = parseInt(result[3], 16);
-      return (r << 24) | (g << 16) | (b << 8) | 0xFF;
+      return {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+      };
     }
-    return 0xFF6B6BFF;
+    return { r: 255, g: 107, b: 107 };
   }
 }
 
