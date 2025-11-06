@@ -3,16 +3,8 @@ const axios = require('axios');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
-const cloudinary = require('cloudinary').v2;
 
 dotenv.config();
-
-// Cloudinary config
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
 
 const app = express();
 app.use(express.json());
@@ -85,35 +77,39 @@ class ImageGenerator {
         b: parseInt(result[3], 16)
       };
     }
-    return { r: 255, g: 107, b: 107 };
+    return { r: 15, g: 23, b: 42 };
   }
 }
 
 // ===================== INSTAGRAM/FACEBOOK POSTER =====================
 class SocialMediaPoster {
-  async uploadToCloudinary(imageBuffer) {
+  async uploadToImgur(imageBuffer) {
     try {
-      console.log('📥 Uploading to Cloudinary...');
+      console.log('📥 Uploading to Imgur...');
       
-      const result = await new Promise((resolve, reject) => {
-        const uploadStream = cloudinary.uploader.upload_stream(
-          { resource_type: 'auto' },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result);
-          }
-        );
-        uploadStream.end(imageBuffer);
-      });
+      const formData = new FormData();
+      const blob = new Blob([imageBuffer], { type: 'image/png' });
+      formData.append('image', blob);
 
-      if (result.secure_url) {
-        console.log('✅ Uploaded to Cloudinary:', result.secure_url);
-        return result.secure_url;
+      const response = await axios.post('https://api.imgur.com/3/image', 
+        formData,
+        {
+          headers: {
+            'Authorization': 'Client-ID 69e0f6e76b5b0f7'
+          },
+          timeout: 30000
+        }
+      );
+
+      if (response.data.success) {
+        const imageUrl = response.data.data.link;
+        console.log('✅ Uploaded to Imgur:', imageUrl);
+        return imageUrl;
       }
-      throw new Error('Cloudinary upload failed');
+      throw new Error('Imgur upload failed');
 
     } catch (error) {
-      console.error('❌ Cloudinary error:', error.message);
+      console.error('❌ Imgur error:', error.message);
       return null;
     }
   }
@@ -240,7 +236,7 @@ async function automatePosting() {
       return;
     }
 
-    const imageUrl = await poster.uploadToCloudinary(imageBuffer);
+    const imageUrl = await poster.uploadToImgur(imageBuffer);
     if (!imageUrl) {
       console.error('❌ Upload failed');
       return;
@@ -288,7 +284,7 @@ app.get('/api/status', (req, res) => {
     server: 'running',
     instagram_configured: !!INSTAGRAM_TOKEN,
     facebook_configured: !!FACEBOOK_TOKEN,
-    cloudinary_configured: !!process.env.CLOUDINARY_CLOUD_NAME,
+    imgur_configured: true,
     scheduler: 'active',
     timestamp: new Date().toISOString()
   });
@@ -298,29 +294,6 @@ app.post('/api/post-now', async (req, res) => {
   try {
     const result = await automatePosting();
     res.json(result || { status: 'error' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/api/generate-image', async (req, res) => {
-  try {
-    const { text, bgColor, textColor, style } = req.body;
-    const imgGen = new ImageGenerator();
-    
-    const imageBuffer = await imgGen.generateImage(
-      text || '🎉 Hello World',
-      bgColor || '#FF6B6B',
-      textColor || '#FFFFFF',
-      style || 'simple'
-    );
-
-    if (imageBuffer) {
-      res.set('Content-Type', 'image/png');
-      res.send(imageBuffer);
-    } else {
-      res.status(500).json({ error: 'Image generation failed' });
-    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
