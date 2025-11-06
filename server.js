@@ -83,45 +83,17 @@ class ImageGenerator {
 
 // ===================== INSTAGRAM/FACEBOOK POSTER =====================
 class SocialMediaPoster {
-  async uploadToImgur(imageBuffer) {
-    try {
-      console.log('📥 Uploading to Imgur...');
-      
-      const formData = new FormData();
-      const blob = new Blob([imageBuffer], { type: 'image/png' });
-      formData.append('image', blob);
-
-      const response = await axios.post('https://api.imgur.com/3/image', 
-        formData,
-        {
-          headers: {
-            'Authorization': 'Client-ID 69e0f6e76b5b0f7'
-          },
-          timeout: 30000
-        }
-      );
-
-      if (response.data.success) {
-        const imageUrl = response.data.data.link;
-        console.log('✅ Uploaded to Imgur:', imageUrl);
-        return imageUrl;
-      }
-      throw new Error('Imgur upload failed');
-
-    } catch (error) {
-      console.error('❌ Imgur error:', error.message);
-      return null;
-    }
-  }
-
-  async postToInstagram(imageUrl, caption) {
+  async postToInstagram(imageBuffer, caption) {
     try {
       console.log('📱 Posting to Instagram...');
+
+      const base64 = imageBuffer.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64}`;
 
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
         {
-          image_url: imageUrl,
+          image_url: dataUrl,
           caption: caption,
           access_token: INSTAGRAM_TOKEN
         },
@@ -155,18 +127,20 @@ class SocialMediaPoster {
     }
   }
 
-  async postToFacebook(imageUrl, caption) {
+  async postToFacebook(imageBuffer, caption) {
     try {
       console.log('📘 Posting to Facebook...');
+
+      const base64 = imageBuffer.toString('base64');
 
       const response = await axios.post(
         `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
         {
-          url: imageUrl,
+          source: base64,
           caption: caption,
           access_token: FACEBOOK_TOKEN
         },
-        { timeout: 30000 }
+        { timeout: 30000, maxBodyLength: Infinity, maxContentLength: Infinity }
       );
 
       if (response.status === 200) {
@@ -236,18 +210,11 @@ async function automatePosting() {
       return;
     }
 
-    const imageUrl = await poster.uploadToImgur(imageBuffer);
-    if (!imageUrl) {
-      console.error('❌ Upload failed');
-      return;
-    }
-
-    const instaPostId = await poster.postToInstagram(imageUrl, content.caption);
-    const fbPostId = await poster.postToFacebook(imageUrl, content.caption);
+    const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
+    const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
 
     const result = {
       timestamp: new Date().toISOString(),
-      imageUrl: imageUrl,
       instagramPostId: instaPostId,
       facebookPostId: fbPostId,
       caption: content.caption,
@@ -284,7 +251,6 @@ app.get('/api/status', (req, res) => {
     server: 'running',
     instagram_configured: !!INSTAGRAM_TOKEN,
     facebook_configured: !!FACEBOOK_TOKEN,
-    imgur_configured: true,
     scheduler: 'active',
     timestamp: new Date().toISOString()
   });
