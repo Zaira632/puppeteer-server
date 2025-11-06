@@ -3,6 +3,7 @@ const axios = require('axios');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
+const FormData = require('form-data');
 
 dotenv.config();
 
@@ -84,15 +85,15 @@ class SocialMediaPoster {
     try {
       console.log('📘 Posting to Facebook...');
 
+      const formData = new FormData();
+      formData.append('source', imageBuffer);
+      formData.append('caption', caption);
+
       const response = await axios.post(
-        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
-        imageBuffer,
+        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos?access_token=${FACEBOOK_TOKEN}`,
+        formData,
         {
-          params: {
-            caption: caption,
-            access_token: FACEBOOK_TOKEN
-          },
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: formData.getHeaders(),
           timeout: 30000
         }
       );
