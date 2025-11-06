@@ -188,24 +188,31 @@ class SocialMediaPoster {
 // ===================== CONTENT TEMPLATES =====================
 const CONTENT_TEMPLATES = [
   {
-    text: '🎉 Amazing Deal\n50% OFF',
-    caption: 'Limited time offer! Don\'t miss out! #deals #shopping #offer',
-    bgColor: '#FF6B6B',
-    textColor: '#FFFFFF',
-    style: 'border'
-  },
-  {
-    text: '🔥 New Collection\nAvailable Now',
-    caption: 'Check out our latest products! #new #collection #trend',
-    bgColor: '#4ECDC4',
-    textColor: '#FFFFFF',
+    text: '🤖 NexaFlow\nAI Automation\n24/7',
+    caption: 'Automate your business with NexaFlow AI. No manual work. 100% hands-free automation. #AI #Automation #NexaFlow',
+    bgColor: '#0F172A',
+    textColor: '#00D9FF',
     style: 'simple'
   },
   {
-    text: '🎁 Weekend Special\nBig Discount',
-    caption: 'Perfect gifts for everyone! #weekend #special #offer',
-    bgColor: '#95E1D3',
-    textColor: '#FFFFFF',
+    text: '⚡ Smart Work\nZero Effort\nMaximum Results',
+    caption: 'Let NexaFlow handle your repetitive tasks. Focus on growth! #SmartAutomation #NexaFlow',
+    bgColor: '#1A1A2E',
+    textColor: '#00FFFF',
+    style: 'simple'
+  },
+  {
+    text: '🚀 NexaFlow\nYour AI Agent\n24/7 Active',
+    caption: 'Never miss a lead. Never do manual work. NexaFlow works while you sleep. #AI #Automation',
+    bgColor: '#0D1B2A',
+    textColor: '#FF00FF',
+    style: 'simple'
+  },
+  {
+    text: '💡 Transform\nYour Business\nWith AI',
+    caption: 'Fully hands-free automation. Zero missed leads. NexaFlow AI Agent. #FutureOfWork #Automation',
+    bgColor: '#16213E',
+    textColor: '#00D9FF',
     style: 'simple'
   }
 ];
