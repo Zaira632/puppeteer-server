@@ -3,6 +3,7 @@ const axios = require('axios');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
+const FormData = require('form-data');
 
 dotenv.config();
 
@@ -81,19 +82,48 @@ class ImageGenerator {
   }
 }
 
+// ===================== IMAGE UPLOADER =====================
+class ImageUploader {
+  async uploadToImgbb(imageBuffer) {
+    try {
+      console.log('📥 Uploading to Imgbb...');
+      
+      const formData = new FormData();
+      formData.append('image', imageBuffer);
+      
+      const response = await axios.post(
+        'https://api.imgbb.com/1/upload?key=c1df2f8e76f12b5',
+        formData,
+        {
+          headers: formData.getHeaders(),
+          timeout: 30000
+        }
+      );
+
+      if (response.data.success) {
+        const imageUrl = response.data.data.url;
+        console.log('✅ Uploaded to Imgbb:', imageUrl);
+        return imageUrl;
+      }
+      throw new Error('Imgbb upload failed');
+
+    } catch (error) {
+      console.error('❌ Imgbb error:', error.message);
+      return null;
+    }
+  }
+}
+
 // ===================== INSTAGRAM/FACEBOOK POSTER =====================
 class SocialMediaPoster {
-  async postToInstagram(imageBuffer, caption) {
+  async postToInstagram(imageUrl, caption) {
     try {
       console.log('📱 Posting to Instagram...');
-
-      const base64 = imageBuffer.toString('base64');
-      const dataUrl = `data:image/png;base64,${base64}`;
 
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
         {
-          image_url: dataUrl,
+          image_url: imageUrl,
           caption: caption,
           access_token: INSTAGRAM_TOKEN
         },
@@ -127,20 +157,18 @@ class SocialMediaPoster {
     }
   }
 
-  async postToFacebook(imageBuffer, caption) {
+  async postToFacebook(imageUrl, caption) {
     try {
       console.log('📘 Posting to Facebook...');
-
-      const base64 = imageBuffer.toString('base64');
 
       const response = await axios.post(
         `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
         {
-          source: base64,
+          url: imageUrl,
           caption: caption,
           access_token: FACEBOOK_TOKEN
         },
-        { timeout: 30000, maxBodyLength: Infinity, maxContentLength: Infinity }
+        { timeout: 30000 }
       );
 
       if (response.status === 200) {
@@ -193,11 +221,13 @@ async function automatePosting() {
     console.log('\n🚀 Starting automation...');
     
     const imgGen = new ImageGenerator();
+    const uploader = new ImageUploader();
     const poster = new SocialMediaPoster();
 
     const content = CONTENT_TEMPLATES[Math.floor(Math.random() * CONTENT_TEMPLATES.length)];
     console.log('📋 Selected content:', content.text);
 
+    // Step 1: Generate image
     const imageBuffer = await imgGen.generateImage(
       content.text,
       content.bgColor,
@@ -207,14 +237,25 @@ async function automatePosting() {
 
     if (!imageBuffer) {
       console.error('❌ Image generation failed');
-      return;
+      return { status: 'error', message: 'Image generation failed' };
     }
 
-    const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
-    const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
+    // Step 2: Upload to Imgbb
+    const imageUrl = await uploader.uploadToImgbb(imageBuffer);
+    if (!imageUrl) {
+      console.error('❌ Upload failed');
+      return { status: 'error', message: 'Image upload failed' };
+    }
+
+    // Step 3: Post to Instagram
+    const instaPostId = await poster.postToInstagram(imageUrl, content.caption);
+
+    // Step 4: Post to Facebook
+    const fbPostId = await poster.postToFacebook(imageUrl, content.caption);
 
     const result = {
       timestamp: new Date().toISOString(),
+      imageUrl: imageUrl,
       instagramPostId: instaPostId,
       facebookPostId: fbPostId,
       caption: content.caption,
@@ -226,6 +267,7 @@ async function automatePosting() {
 
   } catch (error) {
     console.error('❌ Automation error:', error.message);
+    return { status: 'error', message: error.message };
   }
 }
 
