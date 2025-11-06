@@ -3,7 +3,6 @@ const axios = require('axios');
 const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
-const FormData = require('form-data');
 
 dotenv.config();
 
@@ -28,11 +27,9 @@ class ImageGenerator {
       const width = 1080;
       const height = 1350;
       
-      // Convert hex to RGB
       const bgRgb = this.hexToRgb(bgColor);
       const textRgb = this.hexToRgb(textColor);
       
-      // Create SVG with text
       const lines = text.split('\n');
       let yPosition = 400;
       let svgText = '';
@@ -55,7 +52,6 @@ class ImageGenerator {
         </svg>
       `;
       
-      // Convert SVG to PNG
       const buffer = await sharp(Buffer.from(svg))
         .png()
         .toBuffer();
@@ -82,48 +78,47 @@ class ImageGenerator {
   }
 }
 
-// ===================== IMAGE UPLOADER =====================
-class ImageUploader {
-  async uploadToImgbb(imageBuffer) {
+// ===================== SOCIAL MEDIA POSTER =====================
+class SocialMediaPoster {
+  async postToFacebook(imageBuffer, caption) {
     try {
-      console.log('📥 Uploading to Imgbb...');
-      
-      const formData = new FormData();
-      formData.append('image', imageBuffer);
-      
+      console.log('📘 Posting to Facebook...');
+
       const response = await axios.post(
-        'https://api.imgbb.com/1/upload?key=c1df2f8e76f12b5',
-        formData,
+        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
+        imageBuffer,
         {
-          headers: formData.getHeaders(),
+          params: {
+            caption: caption,
+            access_token: FACEBOOK_TOKEN
+          },
+          headers: { 'Content-Type': 'application/octet-stream' },
           timeout: 30000
         }
       );
 
-      if (response.data.success) {
-        const imageUrl = response.data.data.url;
-        console.log('✅ Uploaded to Imgbb:', imageUrl);
-        return imageUrl;
+      if (response.status === 200 && response.data.id) {
+        console.log('✅ Facebook post successful:', response.data.id);
+        return response.data.id;
       }
-      throw new Error('Imgbb upload failed');
 
     } catch (error) {
-      console.error('❌ Imgbb error:', error.message);
+      console.error('❌ Facebook error:', error.message);
       return null;
     }
   }
-}
 
-// ===================== INSTAGRAM/FACEBOOK POSTER =====================
-class SocialMediaPoster {
-  async postToInstagram(imageUrl, caption) {
+  async postToInstagram(imageBuffer, caption) {
     try {
       console.log('📱 Posting to Instagram...');
+
+      const base64Image = imageBuffer.toString('base64');
+      const dataUrl = `data:image/png;base64,${base64Image}`;
 
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
         {
-          image_url: imageUrl,
+          image_url: dataUrl,
           caption: caption,
           access_token: INSTAGRAM_TOKEN
         },
@@ -131,7 +126,8 @@ class SocialMediaPoster {
       );
 
       if (containerResponse.status !== 200) {
-        throw new Error(`Container error: ${containerResponse.data.error}`);
+        console.error('Container error:', containerResponse.data);
+        return null;
       }
 
       const containerId = containerResponse.data.id;
@@ -156,31 +152,6 @@ class SocialMediaPoster {
       return null;
     }
   }
-
-  async postToFacebook(imageUrl, caption) {
-    try {
-      console.log('📘 Posting to Facebook...');
-
-      const response = await axios.post(
-        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
-        {
-          url: imageUrl,
-          caption: caption,
-          access_token: FACEBOOK_TOKEN
-        },
-        { timeout: 30000 }
-      );
-
-      if (response.status === 200) {
-        console.log('✅ Facebook post successful:', response.data.id);
-        return response.data.id;
-      }
-
-    } catch (error) {
-      console.error('❌ Facebook error:', error.message);
-      return null;
-    }
-  }
 }
 
 // ===================== CONTENT TEMPLATES =====================
@@ -189,50 +160,44 @@ const CONTENT_TEMPLATES = [
     text: '🤖 NexaFlow\nAI Automation\n24/7',
     caption: 'Automate your business with NexaFlow AI. No manual work. 100% hands-free automation. #AI #Automation #NexaFlow',
     bgColor: '#0F172A',
-    textColor: '#00D9FF',
-    style: 'simple'
+    textColor: '#00D9FF'
   },
   {
     text: '⚡ Smart Work\nZero Effort\nMaximum Results',
     caption: 'Let NexaFlow handle your repetitive tasks. Focus on growth! #SmartAutomation #NexaFlow',
     bgColor: '#1A1A2E',
-    textColor: '#00FFFF',
-    style: 'simple'
+    textColor: '#00FFFF'
   },
   {
     text: '🚀 NexaFlow\nYour AI Agent\n24/7 Active',
     caption: 'Never miss a lead. Never do manual work. NexaFlow works while you sleep. #AI #Automation',
     bgColor: '#0D1B2A',
-    textColor: '#FF00FF',
-    style: 'simple'
+    textColor: '#FF00FF'
   },
   {
     text: '💡 Transform\nYour Business\nWith AI',
     caption: 'Fully hands-free automation. Zero missed leads. NexaFlow AI Agent. #FutureOfWork #Automation',
     bgColor: '#16213E',
-    textColor: '#00D9FF',
-    style: 'simple'
+    textColor: '#00D9FF'
   }
 ];
 
-// ===================== MAIN AUTOMATION FUNCTION =====================
+// ===================== MAIN AUTOMATION =====================
 async function automatePosting() {
   try {
     console.log('\n🚀 Starting automation...');
     
     const imgGen = new ImageGenerator();
-    const uploader = new ImageUploader();
     const poster = new SocialMediaPoster();
 
     const content = CONTENT_TEMPLATES[Math.floor(Math.random() * CONTENT_TEMPLATES.length)];
     console.log('📋 Selected content:', content.text);
 
-    // Step 1: Generate image
+    // Generate image
     const imageBuffer = await imgGen.generateImage(
       content.text,
       content.bgColor,
-      content.textColor,
-      content.style
+      content.textColor
     );
 
     if (!imageBuffer) {
@@ -240,29 +205,21 @@ async function automatePosting() {
       return { status: 'error', message: 'Image generation failed' };
     }
 
-    // Step 2: Upload to Imgbb
-    const imageUrl = await uploader.uploadToImgbb(imageBuffer);
-    if (!imageUrl) {
-      console.error('❌ Upload failed');
-      return { status: 'error', message: 'Image upload failed' };
-    }
+    // Post to Facebook
+    const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
 
-    // Step 3: Post to Instagram
-    const instaPostId = await poster.postToInstagram(imageUrl, content.caption);
-
-    // Step 4: Post to Facebook
-    const fbPostId = await poster.postToFacebook(imageUrl, content.caption);
+    // Post to Instagram
+    const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
 
     const result = {
       timestamp: new Date().toISOString(),
-      imageUrl: imageUrl,
-      instagramPostId: instaPostId,
       facebookPostId: fbPostId,
+      instagramPostId: instaPostId,
       caption: content.caption,
-      status: (instaPostId && fbPostId) ? 'success' : 'partial'
+      status: (fbPostId || instaPostId) ? 'success' : 'error'
     };
 
-    console.log('\n📊 Final Report:', result);
+    console.log('\n📊 Report:', result);
     return result;
 
   } catch (error) {
@@ -274,51 +231,36 @@ async function automatePosting() {
 // ===================== ROUTES =====================
 
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: '✅ Server is alive!',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
+  res.json({ status: '✅ Alive', timestamp: new Date().toISOString() });
 });
 
 app.get('/screenshot', (req, res) => {
-  res.json({
-    status: '✅ Screenshot endpoint working!',
-    message: 'Server is ready'
-  });
+  res.json({ status: '✅ Ready' });
 });
 
 app.get('/api/status', (req, res) => {
   res.json({
     server: 'running',
-    instagram_configured: !!INSTAGRAM_TOKEN,
-    facebook_configured: !!FACEBOOK_TOKEN,
-    scheduler: 'active',
+    instagram: !!INSTAGRAM_TOKEN,
+    facebook: !!FACEBOOK_TOKEN,
     timestamp: new Date().toISOString()
   });
 });
 
 app.post('/api/post-now', async (req, res) => {
-  try {
-    const result = await automatePosting();
-    res.json(result || { status: 'error' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  const result = await automatePosting();
+  res.json(result);
 });
 
 // ===================== SCHEDULER =====================
 cron.schedule('0 9 * * *', () => {
-  console.log('\n⏰ Scheduled automation triggered');
+  console.log('⏰ Daily automation triggered');
   automatePosting();
 });
 
-console.log('✅ Scheduler started');
+console.log('✅ Scheduler active');
 
-// ===================== SERVER START =====================
+// ===================== START =====================
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🎬 Server running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📍 Status: http://localhost:${PORT}/api/status`);
-  console.log(`📍 Post now: POST http://localhost:${PORT}/api/post-now`);
+  console.log(`🎬 Server running on port ${PORT}`);
 });
