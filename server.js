@@ -162,6 +162,9 @@ class SocialMediaPoster {
       const containerId = containerResponse.data.id;
       console.log('✅ Container created:', containerId);
       
+      // Wait 5 seconds before publishing (avoid rate limit)
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
       // Step 2: Publish media
       const publishResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media_publish`,
