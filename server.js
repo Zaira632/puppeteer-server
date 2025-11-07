@@ -115,13 +115,39 @@ class SocialMediaPoster {
     try {
       console.log('📱 Posting to Instagram...');
       
-      const base64Image = imageBuffer.toString('base64');
+      // Upload image to imgbb or similar service for public URL
+      const formData = new FormData();
+      formData.append('image', imageBuffer.toString('base64'));
+      
+      // Using imgur API (free, no auth for basic use)
+      const uploadResponse = await axios.post(
+        'https://api.imgur.com/3/image',
+        formData,
+        {
+          headers: {
+            'Authorization': 'Client-ID 513a1c3b22c58f9'
+          },
+          timeout: 30000
+        }
+      ).catch(() => {
+        console.log('Imgur upload failed, trying direct approach...');
+        return null;
+      });
+      
+      let imageUrl;
+      if (uploadResponse && uploadResponse.data?.data?.link) {
+        imageUrl = uploadResponse.data.data.link;
+        console.log('✅ Image uploaded to Imgur:', imageUrl);
+      } else {
+        console.warn('⚠️ Using base64 as fallback');
+        imageUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+      }
       
       // Step 1: Create media container
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
         {
-          image_url: `data:image/png;base64,${base64Image}`,
+          image_url: imageUrl,
           caption: caption,
           access_token: INSTAGRAM_TOKEN
         },
