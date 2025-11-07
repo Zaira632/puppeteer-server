@@ -80,31 +80,37 @@ class ImageGenerator {
 }
 
 // ===================== SOCIAL MEDIA POSTER =====================
+const axios = require('axios');
+const FormData = require('form-data');
+const { Readable } = require('stream');
+
 class SocialMediaPoster {
   async postToFacebook(imageBuffer, caption) {
     try {
       console.log('📘 Posting to Facebook...');
-
       const formData = new FormData();
-      formData.append('source', imageBuffer);
+      
+      // Image ko stream mein convert karo
+      const stream = Readable.from(imageBuffer);
+      formData.append('source', stream, 'image.png');
       formData.append('caption', caption);
-
+      formData.append('access_token', process.env.FACEBOOK_TOKEN);
+      
       const response = await axios.post(
-        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos?access_token=${FACEBOOK_TOKEN}`,
+        `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/photos`,
         formData,
         {
           headers: formData.getHeaders(),
           timeout: 30000
         }
       );
-
+      
       if (response.status === 200 && response.data.id) {
         console.log('✅ Facebook post successful:', response.data.id);
         return response.data.id;
       }
-
     } catch (error) {
-      console.error('❌ Facebook error:', error.message);
+      console.error('❌ Facebook error:', error.response?.data || error.message);
       return null;
     }
   }
@@ -112,48 +118,48 @@ class SocialMediaPoster {
   async postToInstagram(imageBuffer, caption) {
     try {
       console.log('📱 Posting to Instagram...');
-
-      const base64Image = imageBuffer.toString('base64');
-      const dataUrl = `data:image/png;base64,${base64Image}`;
-
+      
+      // Step 1: Create media container
       const containerResponse = await axios.post(
-        `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
+        `https://graph.instagram.com/v18.0/${process.env.INSTAGRAM_BUSINESS_ID}/media`,
         {
-          image_url: dataUrl,
+          image_url: imageBuffer, // URL string expected, not base64
           caption: caption,
-          access_token: INSTAGRAM_TOKEN
+          access_token: process.env.INSTAGRAM_TOKEN
         },
         { timeout: 30000 }
       );
-
+      
       if (containerResponse.status !== 200) {
         console.error('Container error:', containerResponse.data);
         return null;
       }
-
+      
       const containerId = containerResponse.data.id;
       console.log('✅ Container created:', containerId);
-
+      
+      // Step 2: Publish media
       const publishResponse = await axios.post(
-        `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media_publish`,
+        `https://graph.instagram.com/v18.0/${process.env.INSTAGRAM_BUSINESS_ID}/media_publish`,
         {
           creation_id: containerId,
-          access_token: INSTAGRAM_TOKEN
+          access_token: process.env.INSTAGRAM_TOKEN
         },
         { timeout: 30000 }
       );
-
+      
       if (publishResponse.status === 200) {
         console.log('✅ Instagram post successful:', publishResponse.data.id);
         return publishResponse.data.id;
       }
-
     } catch (error) {
-      console.error('❌ Instagram error:', error.message);
+      console.error('❌ Instagram error:', error.response?.data || error.message);
       return null;
     }
   }
 }
+
+module.exports = SocialMediaPoster;
 
 // ===================== CONTENT TEMPLATES =====================
 const CONTENT_TEMPLATES = [
