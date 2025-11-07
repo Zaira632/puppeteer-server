@@ -1,201 +1,292 @@
-require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cron = require('node-cron');
-const cloudinary = require('cloudinary').v2;
+const dotenv = require('dotenv');
 const sharp = require('sharp');
+const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
+
+dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// Cloudinary Configuration
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+// Environment variables
+const INSTAGRAM_TOKEN = process.env.INSTAGRAM_TOKEN;
+const INSTAGRAM_BUSINESS_ID = process.env.INSTAGRAM_ACCOUNT_ID;
+const FACEBOOK_TOKEN = process.env.FACEBOOK_TOKEN;
+const FACEBOOK_PAGE_ID = process.env.FACEBOOK_PAGE_ID;
+const PORT = process.env.PORT || 5000;
 
-// ✅ Instagram Post Function (FIXED)
-const postToInstagram = async (imageUrl, caption) => {
-  try {
-    console.log('📸 Creating Instagram media container...');
-    
-    // Step 1: Create Media Container
-    const containerResponse = await axios.post(
-      `https://graph.facebook.com/v18.0/${process.env.INSTAGRAM_ACCOUNT_ID}/media`,
-      {
-        image_url: imageUrl,
-        caption: caption,
-        access_token: process.env.ACCESS_TOKEN
+console.log('✅ Server starting...');
+
+// ===================== IMAGE GENERATOR =====================
+class ImageGenerator {
+  async generateImage(text, bgColor, textColor, style = 'simple') {
+    try {
+      console.log('📝 Generating image...');
+      
+      const width = 1080;
+      const height = 1350;
+      
+      const bgRgb = this.hexToRgb(bgColor);
+      const textRgb = this.hexToRgb(textColor);
+      
+      const lines = text.split('\n');
+      let yPosition = 400;
+      let svgText = '';
+      
+      for (let i = 0; i < lines.length; i++) {
+        svgText += `<text x="540" y="${yPosition + (i * 150)}" 
+                    font-size="80" 
+                    font-weight="bold" 
+                    text-anchor="middle" 
+                    fill="rgb(${textRgb.r},${textRgb.g},${textRgb.b})"
+                    font-family="Arial, sans-serif">
+                    ${lines[i]}
+                  </text>`;
       }
+      
+      const svg = `
+        <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+          <rect width="${width}" height="${height}" fill="rgb(${bgRgb.r},${bgRgb.g},${bgRgb.b})"/>
+          ${svgText}
+        </svg>
+      `;
+      
+      const buffer = await sharp(Buffer.from(svg))
+        .png()
+        .toBuffer();
+      
+      console.log('✅ Image generated successfully');
+      return buffer;
+
+    } catch (error) {
+      console.error('❌ Image generation error:', error.message);
+      return null;
+    }
+  }
+
+  hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (result) {
+      return {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+      };
+    }
+    return { r: 15, g: 23, b: 42 };
+  }
+}
+
+// ===================== SOCIAL MEDIA POSTER =====================
+class SocialMediaPoster {
+  async postToFacebook(imageBuffer, caption) {
+    try {
+      console.log('📘 Posting to Facebook...');
+      const formData = new FormData();
+      
+      // Image ko stream mein convert karo
+      const stream = Readable.from(imageBuffer);
+      formData.append('source', stream, 'image.png');
+      formData.append('caption', caption);
+      formData.append('access_token', FACEBOOK_TOKEN);
+      
+      const response = await axios.post(
+        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
+        formData,
+        {
+          headers: formData.getHeaders(),
+          timeout: 30000
+        }
+      );
+      
+      if (response.status === 200 && response.data.id) {
+        console.log('✅ Facebook post successful:', response.data.id);
+        return response.data.id;
+      }
+    } catch (error) {
+      console.error('❌ Facebook error:', error.response?.data || error.message);
+      return null;
+    }
+  }
+
+  async postToInstagram(imageBuffer, caption) {
+    try {
+      console.log('📱 Posting to Instagram...');
+      
+      // Save image temporarily
+      const tempDir = path.join(__dirname, 'temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      
+      const imagePath = path.join(tempDir, `image_${Date.now()}.png`);
+      fs.writeFileSync(imagePath, imageBuffer);
+      
+      const fileStream = fs.createReadStream(imagePath);
+      
+      // Step 1: Create media container
+      const containerFormData = new FormData();
+      containerFormData.append('file', fileStream);
+      containerFormData.append('caption', caption);
+      containerFormData.append('access_token', INSTAGRAM_TOKEN);
+      
+      const containerResponse = await axios.post(
+        `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
+        containerFormData,
+        {
+          headers: containerFormData.getHeaders(),
+          timeout: 30000
+        }
+      );
+      
+      if (containerResponse.status !== 200) {
+        console.error('Container error:', containerResponse.data);
+        fs.unlinkSync(imagePath); // Delete temp file
+        return null;
+      }
+      
+      const containerId = containerResponse.data.id;
+      console.log('✅ Container created:', containerId);
+      
+      // Step 2: Publish media
+      const publishResponse = await axios.post(
+        `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media_publish`,
+        {
+          creation_id: containerId,
+          access_token: INSTAGRAM_TOKEN
+        },
+        { timeout: 30000 }
+      );
+      
+      if (publishResponse.status === 200) {
+        console.log('✅ Instagram post successful:', publishResponse.data.id);
+        fs.unlinkSync(imagePath); // Delete temp file
+        return publishResponse.data.id;
+      }
+      
+      fs.unlinkSync(imagePath); // Delete temp file
+      
+    } catch (error) {
+      console.error('❌ Instagram error:', error.response?.data || error.message);
+      return null;
+    }
+  }
+}
+
+// ===================== CONTENT TEMPLATES =====================
+const CONTENT_TEMPLATES = [
+  {
+    text: '🤖 NexaFlow\nAI Automation\n24/7',
+    caption: 'Automate your business with NexaFlow AI. No manual work. 100% hands-free automation. #AI #Automation #NexaFlow',
+    bgColor: '#0F172A',
+    textColor: '#00D9FF'
+  },
+  {
+    text: '⚡ Smart Work\nZero Effort\nMaximum Results',
+    caption: 'Let NexaFlow handle your repetitive tasks. Focus on growth! #SmartAutomation #NexaFlow',
+    bgColor: '#1A1A2E',
+    textColor: '#00FFFF'
+  },
+  {
+    text: '🚀 NexaFlow\nYour AI Agent\n24/7 Active',
+    caption: 'Never miss a lead. Never do manual work. NexaFlow works while you sleep. #AI #Automation',
+    bgColor: '#0D1B2A',
+    textColor: '#FF00FF'
+  },
+  {
+    text: '💡 Transform\nYour Business\nWith AI',
+    caption: 'Fully hands-free automation. Zero missed leads. NexaFlow AI Agent. #FutureOfWork #Automation',
+    bgColor: '#16213E',
+    textColor: '#00D9FF'
+  }
+];
+
+// ===================== MAIN AUTOMATION =====================
+async function automatePosting() {
+  try {
+    console.log('\n🚀 Starting automation...');
+    
+    const imgGen = new ImageGenerator();
+    const poster = new SocialMediaPoster();
+
+    const content = CONTENT_TEMPLATES[Math.floor(Math.random() * CONTENT_TEMPLATES.length)];
+    console.log('📋 Selected content:', content.text);
+
+    // Generate image
+    const imageBuffer = await imgGen.generateImage(
+      content.text,
+      content.bgColor,
+      content.textColor
     );
 
-    const creationId = containerResponse.data.id;
-    console.log('✅ Container created:', creationId);
+    if (!imageBuffer) {
+      console.error('❌ Image generation failed');
+      return { status: 'error', message: 'Image generation failed' };
+    }
 
-    // Wait for Facebook to process the image
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    console.log('✅ Image generated successfully');
 
-    // Step 2: Publish Media
-    console.log('📤 Publishing to Instagram...');
-    const publishResponse = await axios.post(
-      `https://graph.facebook.com/v18.0/${process.env.INSTAGRAM_ACCOUNT_ID}/media_publish`,
-      {
-        creation_id: creationId,
-        access_token: process.env.ACCESS_TOKEN
-      }
-    );
+    // Post to Facebook
+    const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
 
-    console.log('✅ Posted successfully! ID:', publishResponse.data.id);
-    return publishResponse.data;
+    // Post to Instagram
+    const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
 
-  } catch (error) {
-    console.error('❌ Instagram posting error:', error.response?.data || error.message);
-    throw error;
-  }
-};
+    const result = {
+      timestamp: new Date().toISOString(),
+      facebookPostId: fbPostId,
+      instagramPostId: instaPostId,
+      caption: content.caption,
+      status: (fbPostId || instaPostId) ? 'success' : 'error'
+    };
 
-// 📤 Upload Image to Cloudinary
-const uploadToCloudinary = async (imagePath) => {
-  try {
-    console.log('☁️ Uploading to Cloudinary...');
-    
-    const result = await cloudinary.uploader.upload(imagePath, {
-      folder: 'instagram-posts',
-      quality: 'auto',
-      fetch_format: 'auto'
-    });
-
-    console.log('✅ Uploaded to Cloudinary:', result.secure_url);
-    return result.secure_url;
+    console.log('\n📊 Report:', result);
+    return result;
 
   } catch (error) {
-    console.error('❌ Cloudinary upload error:', error);
-    throw error;
+    console.error('❌ Automation error:', error.message);
+    return { status: 'error', message: error.message };
   }
-};
+}
 
-// 🖼️ Process Image with Sharp
-const processImage = async (inputPath, outputPath) => {
-  try {
-    console.log('🎨 Processing image...');
-    
-    await sharp(inputPath)
-      .resize(1080, 1080, {
-        fit: 'cover',
-        position: 'center'
-      })
-      .jpeg({ quality: 90 })
-      .toFile(outputPath);
+// ===================== ROUTES =====================
 
-    console.log('✅ Image processed');
-    return outputPath;
-
-  } catch (error) {
-    console.error('❌ Image processing error:', error);
-    throw error;
-  }
-};
-
-// 🔄 Main Posting Function
-const schedulePost = async (imagePath, caption) => {
-  try {
-    // 1. Process Image
-    const processedPath = path.join(__dirname, 'processed-image.jpg');
-    await processImage(imagePath, processedPath);
-
-    // 2. Upload to Cloudinary
-    const cloudinaryUrl = await uploadToCloudinary(processedPath);
-
-    // 3. Post to Instagram
-    await postToInstagram(cloudinaryUrl, caption);
-
-    // 4. Cleanup
-    fs.unlinkSync(processedPath);
-    
-    console.log('✅ Post completed successfully!');
-
-  } catch (error) {
-    console.error('❌ Scheduling error:', error);
-  }
-};
-
-// 📅 Cron Job - Har din 10 AM pe post
-cron.schedule('0 10 * * *', async () => {
-  console.log('⏰ Cron job triggered at 10 AM');
-  
-  const imagePath = path.join(__dirname, 'images', 'post.jpg');
-  const caption = '🎯 Daily motivation! #instagram #automation';
-  
-  await schedulePost(imagePath, caption);
+app.get('/api/health', (req, res) => {
+  res.json({ status: '✅ Alive', timestamp: new Date().toISOString() });
 });
 
-// 🌐 API Endpoints
+app.get('/screenshot', (req, res) => {
+  res.json({ status: '✅ Ready' });
+});
 
-// Test endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'running',
-    message: 'Instagram Automation Server is active! 🚀' 
+app.get('/api/status', (req, res) => {
+  res.json({
+    server: 'running',
+    instagram: !!INSTAGRAM_TOKEN,
+    facebook: !!FACEBOOK_TOKEN,
+    timestamp: new Date().toISOString()
   });
 });
 
-// Manual post endpoint
-app.post('/post', async (req, res) => {
-  try {
-    const { imagePath, caption } = req.body;
-    
-    if (!imagePath || !caption) {
-      return res.status(400).json({ 
-        error: 'imagePath and caption are required' 
-      });
-    }
-
-    await schedulePost(imagePath, caption);
-    
-    res.json({ 
-      success: true, 
-      message: 'Posted successfully!' 
-    });
-
-  } catch (error) {
-    res.status(500).json({ 
-      error: error.message 
-    });
-  }
+app.post('/api/post-now', async (req, res) => {
+  const result = await automatePosting();
+  res.json(result);
 });
 
-// Test Instagram connection
-app.get('/test-connection', async (req, res) => {
-  try {
-    const response = await axios.get(
-      `https://graph.facebook.com/v18.0/${process.env.INSTAGRAM_ACCOUNT_ID}`,
-      {
-        params: {
-          fields: 'id,username,name',
-          access_token: process.env.ACCESS_TOKEN
-        }
-      }
-    );
-
-    res.json({
-      success: true,
-      account: response.data
-    });
-
-  } catch (error) {
-    res.status(500).json({
-      error: error.response?.data || error.message
-    });
-  }
+// ===================== SCHEDULER =====================
+cron.schedule('0 9 * * *', () => {
+  console.log('⏰ Daily automation triggered');
+  automatePosting();
 });
 
-// Server start
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`🔗 http://localhost:${PORT}`);
-  console.log('⏰ Cron job scheduled for 10 AM daily');
+console.log('✅ Scheduler active');
+
+// ===================== START =====================
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🎬 Server running on port ${PORT}`);
 });
