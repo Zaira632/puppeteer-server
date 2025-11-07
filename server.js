@@ -4,8 +4,7 @@ const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
 const FormData = require('form-data');
-const fs = require('fs');
-const path = require('path');
+const cloudinary = require('cloudinary').v2;
 const { Readable } = require('stream');
 
 dotenv.config();
@@ -13,12 +12,19 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-// ✅ FIXED: Match Railway variable names exactly
+// ✅ Environment Variables
 const INSTAGRAM_TOKEN = process.env.INSTAGRAM_TOKEN;
 const INSTAGRAM_ACCOUNT_ID = process.env.INSTAGRAM_ACCOUNT_ID;
 const FACEBOOK_TOKEN = process.env.FACEBOOK_TOKEN;
 const FACEBOOK_PAGE_ID = process.env.FACEBOOK_PAGE_ID;
 const PORT = process.env.PORT || 5000;
+
+// ✅ Cloudinary Configuration
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // ✅ Environment validation
 console.log('🔍 Environment Check:');
@@ -26,10 +32,14 @@ console.log('Instagram Token:', INSTAGRAM_TOKEN ? '✅ Loaded' : '❌ Missing');
 console.log('Instagram Account ID:', INSTAGRAM_ACCOUNT_ID ? '✅ Loaded' : '❌ Missing');
 console.log('Facebook Token:', FACEBOOK_TOKEN ? '✅ Loaded' : '❌ Missing');
 console.log('Facebook Page ID:', FACEBOOK_PAGE_ID ? '✅ Loaded' : '❌ Missing');
+console.log('Cloudinary:', process.env.CLOUDINARY_CLOUD_NAME ? '✅ Configured' : '❌ Missing');
 
 if (!INSTAGRAM_TOKEN || !INSTAGRAM_ACCOUNT_ID || !FACEBOOK_TOKEN || !FACEBOOK_PAGE_ID) {
   console.error('❌ Missing required environment variables!');
-  console.error('Required: INSTAGRAM_TOKEN, INSTAGRAM_ACCOUNT_ID, FACEBOOK_TOKEN, FACEBOOK_PAGE_ID');
+}
+
+if (!process.env.CLOUDINARY_CLOUD_NAME) {
+  console.warn('⚠️ Cloudinary not configured - Instagram posting will be disabled');
 }
 
 console.log('✅ Server starting...');
@@ -130,19 +140,23 @@ class SocialMediaPoster {
     }
   }
 
-  // ✅ FIXED: Instagram API requires public URL, not file upload
+  // ✅ FIXED: Instagram with Cloudinary
   async postToInstagram(imageBuffer, caption) {
     try {
-      console.log('📱 Instagram posting requires public image URL');
-      console.log('⚠️ Instagram Graph API does not support direct file upload');
-      console.log('💡 You need to:');
-      console.log('   1. Upload image to Cloudinary/S3/ImgBB first');
-      console.log('   2. Get public URL');
-      console.log('   3. Use that URL in Instagram API');
+      console.log('📱 Posting to Instagram...');
       
-      // ⚠️ This is the CORRECT way but needs image hosting service
-      /*
-      // Step 1: Upload to Cloudinary (example)
+      if (!INSTAGRAM_TOKEN || !INSTAGRAM_ACCOUNT_ID) {
+        console.error('❌ Instagram credentials missing');
+        return null;
+      }
+      
+      if (!process.env.CLOUDINARY_CLOUD_NAME) {
+        console.error('❌ Cloudinary not configured');
+        return null;
+      }
+      
+      // Step 1: Upload to Cloudinary
+      console.log('☁️ Uploading to Cloudinary...');
       const publicUrl = await this.uploadToCloudinary(imageBuffer);
       
       if (!publicUrl) {
@@ -150,11 +164,14 @@ class SocialMediaPoster {
         return null;
       }
       
-      // Step 2: Create media container with public URL
+      console.log('✅ Image uploaded:', publicUrl);
+      
+      // Step 2: Create media container
+      console.log('📦 Creating Instagram media container...');
       const containerResponse = await axios.post(
         `https://graph.facebook.com/v18.0/${INSTAGRAM_ACCOUNT_ID}/media`,
         {
-          image_url: publicUrl,  // ✅ Must be publicly accessible
+          image_url: publicUrl,
           caption: caption,
           access_token: INSTAGRAM_TOKEN
         }
@@ -163,10 +180,12 @@ class SocialMediaPoster {
       const containerId = containerResponse.data.id;
       console.log('✅ Container created:', containerId);
       
-      // Step 3: Wait for processing (10 seconds)
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      // Step 3: Wait for processing
+      console.log('⏳ Waiting for Instagram to process (15 seconds)...');
+      await new Promise(resolve => setTimeout(resolve, 15000));
       
       // Step 4: Publish
+      console.log('📤 Publishing to Instagram...');
       const publishResponse = await axios.post(
         `https://graph.facebook.com/v18.0/${INSTAGRAM_ACCOUNT_ID}/media_publish`,
         {
@@ -177,9 +196,6 @@ class SocialMediaPoster {
       
       console.log('✅ Instagram post successful:', publishResponse.data.id);
       return publishResponse.data.id;
-      */
-      
-      return null;
       
     } catch (error) {
       console.error('❌ Instagram error:', error.response?.data || error.message);
@@ -187,12 +203,34 @@ class SocialMediaPoster {
     }
   }
   
-  // ✅ TODO: Add Cloudinary upload function
+  // ✅ FIXED: Cloudinary Upload Function
   async uploadToCloudinary(imageBuffer) {
-    // Install: npm install cloudinary
-    // Setup Cloudinary credentials in Railway
-    console.log('⚠️ Cloudinary integration needed');
-    return null;
+    try {
+      return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'nexaflow',
+            resource_type: 'image',
+            format: 'png'
+          },
+          (error, result) => {
+            if (error) {
+              console.error('❌ Cloudinary upload error:', error);
+              reject(error);
+            } else {
+              console.log('✅ Cloudinary upload successful');
+              resolve(result.secure_url);
+            }
+          }
+        );
+        
+        const readableStream = Readable.from(imageBuffer);
+        readableStream.pipe(uploadStream);
+      });
+    } catch (error) {
+      console.error('❌ Cloudinary error:', error);
+      return null;
+    }
   }
 }
 
@@ -252,16 +290,19 @@ async function automatePosting() {
     // Post to Facebook
     const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
 
-    // Post to Instagram (currently disabled - needs Cloudinary)
-    const instaPostId = null; // await poster.postToInstagram(imageBuffer, content.caption);
+    // Post to Instagram (now enabled with Cloudinary)
+    const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
 
     const result = {
       timestamp: new Date().toISOString(),
       facebookPostId: fbPostId,
       instagramPostId: instaPostId,
       caption: content.caption,
-      status: fbPostId ? 'success' : 'error',
-      note: 'Instagram requires Cloudinary setup'
+      status: (fbPostId || instaPostId) ? 'success' : 'error',
+      platforms: {
+        facebook: fbPostId ? 'posted' : 'failed',
+        instagram: instaPostId ? 'posted' : 'failed'
+      }
     };
 
     console.log('\n📊 Report:', result);
@@ -290,6 +331,7 @@ app.get('/api/status', (req, res) => {
     instagramAccountId: !!INSTAGRAM_ACCOUNT_ID,
     facebook: !!FACEBOOK_TOKEN,
     facebookPageId: !!FACEBOOK_PAGE_ID,
+    cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME,
     timestamp: new Date().toISOString()
   });
 });
