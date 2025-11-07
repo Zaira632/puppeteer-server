@@ -4,8 +4,6 @@ const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
 const FormData = require('form-data');
-const fs = require('fs');
-const path = require('path');
 const { Readable } = require('stream');
 
 dotenv.config();
@@ -89,7 +87,6 @@ class SocialMediaPoster {
       console.log('📘 Posting to Facebook...');
       const formData = new FormData();
       
-      // Image ko stream mein convert karo
       const stream = Readable.from(imageBuffer);
       formData.append('source', stream, 'image.png');
       formData.append('caption', caption);
@@ -118,35 +115,21 @@ class SocialMediaPoster {
     try {
       console.log('📱 Posting to Instagram...');
       
-      // Save image temporarily
-      const tempDir = path.join(__dirname, 'temp');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      
-      const imagePath = path.join(tempDir, `image_${Date.now()}.png`);
-      fs.writeFileSync(imagePath, imageBuffer);
-      
-      const fileStream = fs.createReadStream(imagePath);
+      const base64Image = imageBuffer.toString('base64');
       
       // Step 1: Create media container
-      const containerFormData = new FormData();
-      containerFormData.append('file', fileStream);
-      containerFormData.append('caption', caption);
-      containerFormData.append('access_token', INSTAGRAM_TOKEN);
-      
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
-        containerFormData,
         {
-          headers: containerFormData.getHeaders(),
-          timeout: 30000
-        }
+          image_url: `data:image/png;base64,${base64Image}`,
+          caption: caption,
+          access_token: INSTAGRAM_TOKEN
+        },
+        { timeout: 30000 }
       );
       
       if (containerResponse.status !== 200) {
         console.error('Container error:', containerResponse.data);
-        fs.unlinkSync(imagePath); // Delete temp file
         return null;
       }
       
@@ -165,11 +148,8 @@ class SocialMediaPoster {
       
       if (publishResponse.status === 200) {
         console.log('✅ Instagram post successful:', publishResponse.data.id);
-        fs.unlinkSync(imagePath); // Delete temp file
         return publishResponse.data.id;
       }
-      
-      fs.unlinkSync(imagePath); // Delete temp file
       
     } catch (error) {
       console.error('❌ Instagram error:', error.response?.data || error.message);
@@ -217,7 +197,6 @@ async function automatePosting() {
     const content = CONTENT_TEMPLATES[Math.floor(Math.random() * CONTENT_TEMPLATES.length)];
     console.log('📋 Selected content:', content.text);
 
-    // Generate image
     const imageBuffer = await imgGen.generateImage(
       content.text,
       content.bgColor,
@@ -229,12 +208,7 @@ async function automatePosting() {
       return { status: 'error', message: 'Image generation failed' };
     }
 
-    console.log('✅ Image generated successfully');
-
-    // Post to Facebook
     const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
-
-    // Post to Instagram
     const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
 
     const result = {
