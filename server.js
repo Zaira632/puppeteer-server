@@ -4,6 +4,9 @@ const cron = require('node-cron');
 const dotenv = require('dotenv');
 const sharp = require('sharp');
 const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
+const { Readable } = require('stream');
 
 dotenv.config();
 
@@ -11,10 +14,10 @@ const app = express();
 app.use(express.json());
 
 // Environment variables
-const INSTAGRAM_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN;
-const INSTAGRAM_BUSINESS_ID = process.env.INSTAGRAM_BUSINESS_ID;
-const FACEBOOK_TOKEN = process.env.FACEBOOK_PAGE_TOKEN;
-const FACEBOOK_PAGE_ID = process.env.FACEBOOK_PAGE_ID;
+const INSTAGRAM_TOKEN = process.env.INSTAGRAM_TOKEN;
+const INSTAGRAM_BUSINESS_ID = process.env.INSTAGRAM_ACCOUNT_ID;
+const FACEBOOK_TOKEN = process.env.FACEBOOK_TOKEN;
+const FACEBOOK_PAGE_ID = process.env.PAGE_ID;
 const PORT = process.env.PORT || 5000;
 
 console.log('✅ Server starting...');
@@ -80,10 +83,6 @@ class ImageGenerator {
 }
 
 // ===================== SOCIAL MEDIA POSTER =====================
-const axios = require('axios');
-const FormData = require('form-data');
-const { Readable } = require('stream');
-
 class SocialMediaPoster {
   async postToFacebook(imageBuffer, caption) {
     try {
@@ -94,10 +93,10 @@ class SocialMediaPoster {
       const stream = Readable.from(imageBuffer);
       formData.append('source', stream, 'image.png');
       formData.append('caption', caption);
-      formData.append('access_token', process.env.FACEBOOK_TOKEN);
+      formData.append('access_token', FACEBOOK_TOKEN);
       
       const response = await axios.post(
-        `https://graph.facebook.com/v18.0/${process.env.FACEBOOK_PAGE_ID}/photos`,
+        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
         formData,
         {
           headers: formData.getHeaders(),
@@ -119,19 +118,35 @@ class SocialMediaPoster {
     try {
       console.log('📱 Posting to Instagram...');
       
+      // Save image temporarily
+      const tempDir = path.join(__dirname, 'temp');
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      
+      const imagePath = path.join(tempDir, `image_${Date.now()}.png`);
+      fs.writeFileSync(imagePath, imageBuffer);
+      
+      const fileStream = fs.createReadStream(imagePath);
+      
       // Step 1: Create media container
+      const containerFormData = new FormData();
+      containerFormData.append('file', fileStream);
+      containerFormData.append('caption', caption);
+      containerFormData.append('access_token', INSTAGRAM_TOKEN);
+      
       const containerResponse = await axios.post(
-        `https://graph.instagram.com/v18.0/${process.env.INSTAGRAM_BUSINESS_ID}/media`,
+        `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
+        containerFormData,
         {
-          image_url: imageBuffer, // URL string expected, not base64
-          caption: caption,
-          access_token: process.env.INSTAGRAM_TOKEN
-        },
-        { timeout: 30000 }
+          headers: containerFormData.getHeaders(),
+          timeout: 30000
+        }
       );
       
       if (containerResponse.status !== 200) {
         console.error('Container error:', containerResponse.data);
+        fs.unlinkSync(imagePath); // Delete temp file
         return null;
       }
       
@@ -140,26 +155,28 @@ class SocialMediaPoster {
       
       // Step 2: Publish media
       const publishResponse = await axios.post(
-        `https://graph.instagram.com/v18.0/${process.env.INSTAGRAM_BUSINESS_ID}/media_publish`,
+        `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media_publish`,
         {
           creation_id: containerId,
-          access_token: process.env.INSTAGRAM_TOKEN
+          access_token: INSTAGRAM_TOKEN
         },
         { timeout: 30000 }
       );
       
       if (publishResponse.status === 200) {
         console.log('✅ Instagram post successful:', publishResponse.data.id);
+        fs.unlinkSync(imagePath); // Delete temp file
         return publishResponse.data.id;
       }
+      
+      fs.unlinkSync(imagePath); // Delete temp file
+      
     } catch (error) {
       console.error('❌ Instagram error:', error.response?.data || error.message);
       return null;
     }
   }
 }
-
-module.exports = SocialMediaPoster;
 
 // ===================== CONTENT TEMPLATES =====================
 const CONTENT_TEMPLATES = [
@@ -211,6 +228,8 @@ async function automatePosting() {
       console.error('❌ Image generation failed');
       return { status: 'error', message: 'Image generation failed' };
     }
+
+    console.log('✅ Image generated successfully');
 
     // Post to Facebook
     const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
