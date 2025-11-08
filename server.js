@@ -14,8 +14,6 @@ app.use(express.json());
 // Environment variables
 const INSTAGRAM_TOKEN = process.env.INSTAGRAM_TOKEN;
 const INSTAGRAM_BUSINESS_ID = process.env.INSTAGRAM_ACCOUNT_ID;
-const FACEBOOK_TOKEN = process.env.FACEBOOK_TOKEN;
-const FACEBOOK_PAGE_ID = process.env.FACEBOOK_PAGE_ID;
 const PORT = process.env.PORT || 5000;
 
 console.log('✅ Server starting...');
@@ -80,46 +78,16 @@ class ImageGenerator {
   }
 }
 
-// ===================== SOCIAL MEDIA POSTER =====================
-class SocialMediaPoster {
-  async postToFacebook(imageBuffer, caption) {
-    try {
-      console.log('📘 Posting to Facebook...');
-      const formData = new FormData();
-      
-      const stream = Readable.from(imageBuffer);
-      formData.append('source', stream, 'image.png');
-      formData.append('caption', caption);
-      formData.append('access_token', FACEBOOK_TOKEN);
-      
-      const response = await axios.post(
-        `https://graph.facebook.com/v18.0/${FACEBOOK_PAGE_ID}/photos`,
-        formData,
-        {
-          headers: formData.getHeaders(),
-          timeout: 30000
-        }
-      );
-      
-      if (response.status === 200 && response.data.id) {
-        console.log('✅ Facebook post successful:', response.data.id);
-        return response.data.id;
-      }
-    } catch (error) {
-      console.error('❌ Facebook error:', error.response?.data || error.message);
-      return null;
-    }
-  }
-
+// ===================== INSTAGRAM POSTER =====================
+class InstagramPoster {
   async postToInstagram(imageBuffer, caption) {
     try {
       console.log('📱 Posting to Instagram...');
       
-      // Upload image to imgbb or similar service for public URL
+      // Upload image to imgur for public URL
       const formData = new FormData();
       formData.append('image', imageBuffer.toString('base64'));
       
-      // Using imgur API (free, no auth for basic use)
       const uploadResponse = await axios.post(
         'https://api.imgur.com/3/image',
         formData,
@@ -137,13 +105,14 @@ class SocialMediaPoster {
       let imageUrl;
       if (uploadResponse && uploadResponse.data?.data?.link) {
         imageUrl = uploadResponse.data.data.link;
-        console.log('✅ Image uploaded to Imgur:', imageUrl);
+        console.log('✅ Image uploaded:', imageUrl);
       } else {
         console.warn('⚠️ Using base64 as fallback');
         imageUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
       }
       
       // Step 1: Create media container
+      console.log('⏳ Creating media container...');
       const containerResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media`,
         {
@@ -162,10 +131,11 @@ class SocialMediaPoster {
       const containerId = containerResponse.data.id;
       console.log('✅ Container created:', containerId);
       
-      // Wait 5 seconds before publishing (avoid rate limit)
+      // Wait 5 seconds before publishing
       await new Promise(resolve => setTimeout(resolve, 5000));
       
       // Step 2: Publish media
+      console.log('📤 Publishing to Instagram...');
       const publishResponse = await axios.post(
         `https://graph.instagram.com/v18.0/${INSTAGRAM_BUSINESS_ID}/media_publish`,
         {
@@ -218,10 +188,10 @@ const CONTENT_TEMPLATES = [
 // ===================== MAIN AUTOMATION =====================
 async function automatePosting() {
   try {
-    console.log('\n🚀 Starting automation...');
+    console.log('\n🚀 Starting Instagram automation...');
     
     const imgGen = new ImageGenerator();
-    const poster = new SocialMediaPoster();
+    const poster = new InstagramPoster();
 
     const content = CONTENT_TEMPLATES[Math.floor(Math.random() * CONTENT_TEMPLATES.length)];
     console.log('📋 Selected content:', content.text);
@@ -237,15 +207,13 @@ async function automatePosting() {
       return { status: 'error', message: 'Image generation failed' };
     }
 
-    const fbPostId = await poster.postToFacebook(imageBuffer, content.caption);
     const instaPostId = await poster.postToInstagram(imageBuffer, content.caption);
 
     const result = {
       timestamp: new Date().toISOString(),
-      facebookPostId: fbPostId,
       instagramPostId: instaPostId,
       caption: content.caption,
-      status: (fbPostId || instaPostId) ? 'success' : 'error'
+      status: instaPostId ? 'success' : 'error'
     };
 
     console.log('\n📊 Report:', result);
@@ -263,15 +231,10 @@ app.get('/api/health', (req, res) => {
   res.json({ status: '✅ Alive', timestamp: new Date().toISOString() });
 });
 
-app.get('/screenshot', (req, res) => {
-  res.json({ status: '✅ Ready' });
-});
-
 app.get('/api/status', (req, res) => {
   res.json({
     server: 'running',
     instagram: !!INSTAGRAM_TOKEN,
-    facebook: !!FACEBOOK_TOKEN,
     timestamp: new Date().toISOString()
   });
 });
@@ -282,14 +245,17 @@ app.post('/api/post-now', async (req, res) => {
 });
 
 // ===================== SCHEDULER =====================
+// Daily at 9 AM
 cron.schedule('0 9 * * *', () => {
-  console.log('⏰ Daily automation triggered');
+  console.log('⏰ Daily Instagram post triggered');
   automatePosting();
 });
 
-console.log('✅ Scheduler active');
+console.log('✅ Instagram scheduler active (9 AM daily)');
 
 // ===================== START =====================
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🎬 Server running on port ${PORT}`);
+  console.log(`🎬 Instagram Auto-Poster running on port ${PORT}`);
+  console.log(`📱 Instagram Business ID: ${INSTAGRAM_BUSINESS_ID}`);
+  console.log(`⏰ Daily schedule: 9 AM`);
 });
